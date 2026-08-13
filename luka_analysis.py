@@ -82,7 +82,8 @@ def show_table(df: pd.DataFrame, caption: str, precision: int = 1) -> None:
 def prepare_data():
     luka = load_csv("luka_seasons.csv")
     league = load_csv("nba_league_averages.csv")
-    elite = load_csv("all_nba_first_team_2025_26.csv")
+    elite_latest = load_csv("all_nba_first_team_2025_26.csv")
+    elite_previous = load_csv("all_nba_first_team_2024_25.csv")
 
     # Približek True Shooting: PTS / [2 * (FGA + 0,44 * FTA)].
     luka["ts_pct"] = 100 * luka["ppg"] / (2 * (luka["fga"] + 0.44 * luka["fta"]))
@@ -94,7 +95,16 @@ def prepare_data():
         merged[f"{metric}_benchmark"] = (
             merged[f"{metric}_league"] * merged["mpg"] / merged["team_mpg"]
         )
-    return luka, league, elite, merged
+    luka_previous = luka.loc[luka["season"].eq("2024-25")].iloc[0]
+    luka_comparison = pd.DataFrame([{
+        "player": "Luka Dončić", "team": luka_previous["team"], "gp": luka_previous["gp"],
+        "mpg": luka_previous["mpg"], "ppg": luka_previous["ppg"], "rpg": luka_previous["rpg"],
+        "apg": luka_previous["apg"], "spg": luka_previous["spg"], "bpg": luka_previous["bpg"],
+        "tov": luka_previous["tov"], "fg_pct": luka_previous["fg_pct"],
+        "fg3_pct": luka_previous["fg3_pct"], "ft_pct": luka_previous["ft_pct"],
+    }])
+    previous_comparison = pd.concat([luka_comparison, elite_previous], ignore_index=True)
+    return luka, league, elite_latest, elite_previous, previous_comparison, merged
 
 
 def chart_career_main(merged: pd.DataFrame) -> go.Figure:
@@ -162,7 +172,7 @@ def chart_latest_vs_league(merged: pd.DataFrame) -> go.Figure:
     return apply_dark_layout(fig, "Sezona 2025/26: Luka proti ligi", "Obe seriji sta izraženi na 35,8 minute")
 
 
-def chart_elite_scatter(elite: pd.DataFrame) -> go.Figure:
+def chart_elite_scatter(elite: pd.DataFrame, season: str, includes_luka: bool = True) -> go.Figure:
     fig = px.scatter(
         elite, x="apg", y="ppg", size="rpg", color="player", text="player",
         size_max=45, hover_data={"gp": True, "mpg": True, "spg": True, "bpg": True, "player": False},
@@ -171,10 +181,13 @@ def chart_elite_scatter(elite: pd.DataFrame) -> go.Figure:
     )
     fig.update_traces(textposition="top center")
     fig.update_layout(showlegend=False)
-    return apply_dark_layout(fig, "Napadalni profil All‑NBA First Team 2025/26", "Velikost kroga = skoki na tekmo")
+    title = f"Napadalni profil All‑NBA First Team {season}"
+    if not includes_luka:
+        title = f"Luka proti All‑NBA First Team {season}"
+    return apply_dark_layout(fig, title, "Velikost kroga = skoki na tekmo")
 
 
-def chart_elite_heatmap(elite: pd.DataFrame) -> go.Figure:
+def chart_elite_heatmap(elite: pd.DataFrame, season: str, includes_luka: bool = True) -> go.Figure:
     metrics = ["ppg", "rpg", "apg", "spg", "bpg", "fg_pct", "fg3_pct", "ft_pct"]
     metric_labels = ["PTS", "REB", "AST", "STL", "BLK", "FG%", "3P%", "FT%"]
     raw = elite.set_index("player")[metrics]
@@ -193,7 +206,11 @@ def chart_elite_heatmap(elite: pd.DataFrame) -> go.Figure:
         texttemplate="%{text}",
         hovertemplate="%{y}<br>%{x}: %{customdata[0]:.1f}<br>Indeks v peterici: %{customdata[1]:.0f}<extra></extra>",
     ))
-    return apply_dark_layout(fig, "Kje vsak član elitne peterice izstopa?", "Številke v celicah so dejanske vrednosti; barva je indeks znotraj peterice")
+    group = "peterice" if includes_luka else "primerjalne skupine"
+    return apply_dark_layout(
+        fig, f"Statistični profil elitne skupine {season}",
+        f"Številke so dejanske vrednosti; barva je indeks znotraj {group}"
+    )
 
 
 def chart_availability(luka: pd.DataFrame) -> go.Figure:
@@ -222,7 +239,7 @@ def export_dashboard(figures: list[go.Figure], path: str = "luka_dashboard.html"
 
 def main() -> None:
     pio.templates.default = "plotly_dark"
-    luka, league, elite, merged = prepare_data()
+    luka, league, elite_latest, elite_previous, previous_comparison, merged = prepare_data()
 
     latest = merged.iloc[-1]
     career = pd.DataFrame({
@@ -241,16 +258,22 @@ def main() -> None:
     season_table.columns = ["Sezona", "Ekipa", "GP", "MIN", "PTS", "REB", "AST", "STL", "BLK", "TOV", "FG%", "3P%", "FT%", "TS%"]
     show_table(season_table, "Luka Dončić – vse NBA-sezone", precision=1)
 
-    elite_table = elite[["player", "gp", "mpg", "ppg", "rpg", "apg", "spg", "bpg", "tov", "fg_pct", "fg3_pct", "ft_pct"]].copy()
+    elite_table = elite_latest[["player", "gp", "mpg", "ppg", "rpg", "apg", "spg", "bpg", "tov", "fg_pct", "fg3_pct", "ft_pct"]].copy()
     elite_table.columns = ["Igralec", "GP", "MIN", "PTS", "REB", "AST", "STL", "BLK", "TOV", "FG%", "3P%", "FT%"]
     show_table(elite_table, "All‑NBA First Team 2025/26", precision=1)
+
+    previous_table = previous_comparison[["player", "gp", "mpg", "ppg", "rpg", "apg", "spg", "bpg", "tov", "fg_pct", "fg3_pct", "ft_pct"]].copy()
+    previous_table.columns = ["Igralec", "GP", "MIN", "PTS", "REB", "AST", "STL", "BLK", "TOV", "FG%", "3P%", "FT%"]
+    show_table(previous_table, "Luka in All‑NBA First Team 2024/25 (dobesedno lansko leto)", precision=1)
 
     figures = [
         chart_career_main(merged),
         chart_shooting(luka, league),
         chart_latest_vs_league(merged),
-        chart_elite_scatter(elite),
-        chart_elite_heatmap(elite),
+        chart_elite_scatter(elite_latest, "2025/26"),
+        chart_elite_heatmap(elite_latest, "2025/26"),
+        chart_elite_scatter(previous_comparison, "2024/25", includes_luka=False),
+        chart_elite_heatmap(previous_comparison, "2024/25", includes_luka=False),
         chart_availability(luka),
     ]
     if SHOW_FIGURES:
